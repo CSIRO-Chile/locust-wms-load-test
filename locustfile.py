@@ -44,7 +44,7 @@ else:
 WMS_VERSION_111 = "1.1.1"
 WMS_VERSION_130 = "1.3.0"
 
-WMS_SUPPORTED_VERSIONS = [WMS_VERSION_111, WMS_VERSION_130]
+WMS_SUPPORTED_VERSIONS = [WMS_VERSION_130]
 
 #Allowed MIME TYPEs for WMS Capabilities XML
 MIME_TYPES_GET_CAPABILITIES=[
@@ -53,10 +53,10 @@ MIME_TYPES_GET_CAPABILITIES=[
     "text/xml",
 ]
 
-TIME_FORMAT_ISO8601 = "%Y-%m-%dT%H:%M:%S.%fZ" 
+TIME_FORMAT_ISO8601 = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 PERIODICITY_PATTERN = re.compile(
-     r"^P" 
+     r"^P"
     +r"((?P<years>\d+)Y)?"
     +r"((?P<months>\d+)M)?"
     +r"((?P<days>\d+)D)?"
@@ -78,12 +78,12 @@ def getPeriodTimedelta(period:str):
     """
     Returns corresponding the timedelta for the time period string.
 
-    See "OpenGIS Web Map Service (WMS) Implementation Specification" 
-    at http://portal.opengeospatial.org/files/?artifact_id=14416 
+    See "OpenGIS Web Map Service (WMS) Implementation Specification"
+    at http://portal.opengeospatial.org/files/?artifact_id=14416
     Chapter "D.3 Period format"
 
     An ISO 8601 Period is used to indicate the time resolution of the available data. The ISO 8601 format for representing a period of time is used to represent the resolution: Designator P (for Period), number of years Y, months M, days D, time designator T, number of hours H, minutes M, seconds S. Unneeded elements may be omitted.
-    
+
     EXAMPLES:
         P1Y — 1year
         P1M10D — 1 month plus 10 days PT2H — 2 hours
@@ -92,7 +92,7 @@ def getPeriodTimedelta(period:str):
     match = PERIODICITY_PATTERN.match(period)
     if (match is None):
         raise Exception("Invalid time period format found: '{}'.".format(period))
-    
+
     delta = {
         "years": 0,
         "months": 0,
@@ -131,10 +131,21 @@ def hasValidGetCapabilitiesResponseType(contentType:str):
     return False
 
 def getRandomBoundingBox():
-    north = random.randrange(0, 90)
-    south = north - 90
-    west = random.randrange(-180, 0)
-    east = west + 180
+#     north = random.randrange(0, 90)
+#     south = north - 90
+#     west = random.randrange(-180, 0)
+#     east = west + 180
+#     return "%s,%s,%s,%s" % (west, south, east, north)
+
+    # Target bbox rounded from http://bboxfinder.com/#-45.000000,-74.000000,-20.000000,-69.000000:
+    # -8300000,-6000000,-7700000,-2200000
+    tileSize = 156543.03392804
+    randomIndex = random.randrange(0,4)
+    tileDivision = [1,2,4,8]
+    north = random.randrange(-6000000, -2200000)
+    south = north - tileSize / tileDivision[randomIndex]
+    west = random.randrange(-8300000, -7700000)
+    east = west + tileSize / tileDivision[randomIndex]
     return "%s,%s,%s,%s" % (west, south, east, north)
 
 def getStyles (layer: xmltodict.OrderedDict):
@@ -147,7 +158,7 @@ def getStyles (layer: xmltodict.OrderedDict):
             for style in layer["Style"]:
                 legendUrl = getLegendURL(style)
                 styles[style["Name"]] = { "LegendURL": legendUrl }
-                
+
         else:
             legendUrl = getLegendURL(layer["Style"])
             styles[layer["Style"]["Name"]] = { "LegendURL": legendUrl }
@@ -166,11 +177,11 @@ def formatDateTime(ts:datetime):
     """
         Formats the datetime according to D.2.1 of WMS Spec: ccyy-mm-ddThh:mm:ss.sssZ
 
-        A time zone suffix is mandatory if the hours field appears in the time string. 
-        All times should be expressed in Coordinated Universal Time (UTC), indicated 
-        by the suffix Z (for "zulu"). When a local time applies, a numeric time zone 
-        suffix as defined by ISO 8601:2004, 5.3.4.1 shall be used. The absence of any 
-        suffix at all means local time in an undefined zone, which shall not be 
+        A time zone suffix is mandatory if the hours field appears in the time string.
+        All times should be expressed in Coordinated Universal Time (UTC), indicated
+        by the suffix Z (for "zulu"). When a local time applies, a numeric time zone
+        suffix as defined by ISO 8601:2004, 5.3.4.1 shall be used. The absence of any
+        suffix at all means local time in an undefined zone, which shall not be
         used in the global network of map servers enabled by this International Standard.
     """
     return ts.isoformat(timespec='milliseconds').replace("+00:00","Z")
@@ -178,9 +189,9 @@ def formatDateTime(ts:datetime):
 def enumerateAvailableTimes(text:str):
     """
         Parses the time definition and returns a list of available times,
-        
+
         Example:
-        - input: 
+        - input:
             "2019-11-07T09:00:00Z,2019-11-09T21:00:00Z/2019-11-22T21:00:00Z/P1D"
         - output:
           [ "2019-11-07T09:00:00Z",
@@ -259,7 +270,7 @@ def parseDimension(dimension:xmltodict.OrderedDict) -> dict:
     except:
         # some required attribute was missing
         raise ValueError(f"Could not parse dimension '{dimension}'.")
-    
+
     if dim["name"] == "time":
         times = enumerateAvailableTimes(dim["values"])
         dim["values"] = times
@@ -273,7 +284,7 @@ def getAllLayers(capabilities:xmltodict.OrderedDict, wmsversion:str):
     rootNodeName = "WMS_Capabilities"
     if wmsversion == WMS_VERSION_111:
         rootNodeName = "WMT_MS_Capabilities"
-    
+
     root = capabilities[rootNodeName]["Capability"]["Layer"]
     nodes = [ root ]
     flattenedLayers = []
@@ -291,7 +302,7 @@ def getAllLayers(capabilities:xmltodict.OrderedDict, wmsversion:str):
         else:
             # it's a layer
             flattenedLayers.append(parent)
-    
+
     allLayers = {}
     for layer in flattenedLayers:
         # get the available styles
@@ -337,21 +348,21 @@ def getRandomGetMapRequest(allLayers:dict, wmsversion:str):
 
     From all available layers randomly picks a layer, style, bounding box and time dimension (if available).
     """
-    randomLayerName = random.choice(list(allLayers.keys()))
+    randomLayerName = "landsat8_geomedian_annual"#random.choice(list(allLayers.keys()))
     randomLayer = allLayers[randomLayerName]
     randomBbox = getRandomBoundingBox()
 
     crsparamname = "crs" # WMS 1.3.0
     if (wmsversion == WMS_VERSION_111):
         crsparamname = "srs" # WMS 1.1.1
-    
+
 
     getMapRequestParams = {
         "request": "GetMap",
-        crsparamname: "EPSG:4326",
-        "layers": randomLayer["name"],
-        "width": 1200,
-        "height": 600,
+        crsparamname: "EPSG:3857",
+        "layers": "landsat8_geomedian_annual",#randomLayer["name"],
+        "width": 256,
+        "height": 256,
         "format": "image/png",
         "bbox": randomBbox,
     }
@@ -363,18 +374,18 @@ def getRandomGetMapRequest(allLayers:dict, wmsversion:str):
     if len(randomLayer["styles"]) > 0:
         randomStyleName = random.choice(list(randomLayer["styles"].keys()))
         getMapRequestParams["styles"] = randomStyleName
-    
+
     dimensions = randomLayer["dimensions"]
     if "time" in dimensions:
         getMapRequestParams["time"] = random.choice(dimensions["time"]["values"])
-    
+
     return getMapRequestParams
 
 def getRandomLegendUrlRequest(allLayers:dict, wmsversion:str):
     """
         Returns request params from the predefined "LegendURL" metadata of a random layer.
     """
-    randomLayerName = random.choice(list(allLayers.keys()))
+    randomLayerName = "landsat8_geomedian_annual"#random.choice(list(allLayers.keys()))
     randomLayer = allLayers[randomLayerName]
     if len(randomLayer["styles"].keys()) < 1:
         return None
@@ -412,7 +423,7 @@ def getRandomGetLegendGraphicRequest(allLayers:dict, wmsversion:str):
 
     From all available layers randomly picks a layer, style, bounding box and time dimension (if available).
     """
-    randomLayerName = random.choice(list(allLayers.keys()))
+    randomLayerName = "landsat8_geomedian_annual"#random.choice(list(allLayers.keys()))
     randomLayer = allLayers[randomLayerName]
 
     getLegendGraphicRequestParams = {
@@ -434,7 +445,7 @@ def getRandomGetLegendGraphicRequest(allLayers:dict, wmsversion:str):
         getLegendGraphicRequestParams["style"] = randomStyleName
     else:
         return None
-    
+
     return getLegendGraphicRequestParams
 
 def getGetCapabilitiesRequest(wmsversion:str):
@@ -459,23 +470,23 @@ def sendGetCapabilitiesRequest(client:locustclients.HttpSession, wmsversion:str)
 
         if not response.status_code == 200:
             errormsg = "Request failed with HTTP status code: '{}'\n Request URL: {}\n Request Params: {}\n Response-Content: '{}'".format(
-                response.status_code, 
-                url, 
-                params, 
+                response.status_code,
+                url,
+                params,
                 response.content )
             vprint( "Request failed:\n{}".format(errormsg) )
             response.failure(errormsg)
             return
-        
+
         if not hasValidGetCapabilitiesResponseType(response.headers['content-type']):
             response.failure("Wrong response content-type encountered: '%s' (see %s)" % (response.headers['content-type'], "https://cite.opengeospatial.org/teamengine/about/wms/1.1.1/site/OGCTestData/wms/1.1.1/spec/wms1.1.1.html#basic_elements.params.format"))
             return
-        
+
         if response.content == "":
             vprint("Request failed (No data): {}".format(url))
             response.failure("No data")
             return
-        
+
         try:
             capabilities = xmltodict.parse(response.content)
             vprint("Request successful: {}".format(url))
@@ -484,7 +495,7 @@ def sendGetCapabilitiesRequest(client:locustclients.HttpSession, wmsversion:str)
             vprint("Request failed (Failed to parse GetCapabilities XML): {}".format(url))
             response.failure("Failed to parse GetCapabilities XML")
             return
-        
+
         try:
             # parse the capabilities document once
             # for each WMS version
@@ -494,7 +505,7 @@ def sendGetCapabilitiesRequest(client:locustclients.HttpSession, wmsversion:str)
             vprint("Request failed (Failed to extract layers from GetCapabilities XML): {}".format(url))
             response.failure("Failed to extract layers from GetCapabilities XML version '{0}'. Error: {1}".format(wmsversion,ex))
             return
-        
+
 
 def sendGetMapRequest(client:locustclients.HttpSession, params:dict, wmsversion:str):
     with client.request("GET", "", params=params, name="WMS-{}-GetMap".format(wmsversion), catch_response=True ) as response:
@@ -533,10 +544,10 @@ def sendGetLegendGraphicRequest(client:locustclients.HttpSession, params:dict, w
         if response.status_code == 200:
             if response.headers['content-type'] != "image/png":
                 errormsg = "Expected format 'image/png' but got '{}' instead\n Request URL: {}\n Request params: '{}'\nResponse: '{}'\n".format(
-                    response.headers['content-type'], 
-                    url, 
-                    params, 
-                    response.text) 
+                    response.headers['content-type'],
+                    url,
+                    params,
+                    response.text)
                 vprint( "Request failed:\n{}".format(errormsg) )
                 response.failure(errormsg)
             else:
@@ -564,7 +575,7 @@ class WebsiteTasks(TaskSet):
 
         if all_layers is None:
             return
-        
+
         if not wmsversion in self.allLayers.keys():
             # parse the capabilities document once
             # for each WMS version
@@ -576,7 +587,7 @@ class WebsiteTasks(TaskSet):
         if not wmsversion in self.allLayers:
             # Get Capabilities document not (yet) processed
             return
-        
+
         #getLegendGraphicRequest = getRandomGetLegendGraphicRequest(self.allLayers[wmsversion], wmsversion=wmsversion)
         getLegendGraphicRequest = getRandomLegendUrlRequest(self.allLayers[wmsversion], wmsversion=wmsversion)
 
@@ -607,9 +618,9 @@ if __name__ == "__main__":
             capabilities = None
             with open("{}/testdata/getcapabilities_{}_{}.xml".format(currentPath,wmsversion, provider), "r",1024, "utf-8") as stream:
                 capabilities = xmltodict.parse(stream.read())
-            
-            allLayers = { 
-                wmsversion : getAllLayers(capabilities=capabilities, wmsversion=wmsversion) 
+
+            allLayers = {
+                wmsversion : getAllLayers(capabilities=capabilities, wmsversion=wmsversion)
             }
             getMapRequest = getRandomGetMapRequest(allLayers[wmsversion], wmsversion=wmsversion)
             print ("{}-WMS-{}-GetMap-Request: \n{}\n".format(provider, wmsversion,getMapRequest))
