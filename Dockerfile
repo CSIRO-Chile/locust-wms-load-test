@@ -1,4 +1,4 @@
-FROM locustio/locust:2.7.0
+FROM locustio/locust:2.13.0
 
 # Install Python run-time dependencies.
 COPY requirements.txt /
