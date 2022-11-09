@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from typing import Optional
-from locust import HttpUser, TaskSet, task, between
+from locust import HttpUser, TaskSet, task, between, run_single_user, SequentialTaskSet
 from locust import clients as locustclients
 import urllib.parse
 
@@ -20,6 +20,18 @@ from math import floor
 #
 # The parameter 'myauthkey' will then be included in all requests
 
+# Set some Params
+
+useRandomLayer = True # Do you want to use all layers in the WMS or not?
+layerName = "landsat8_geomedian_annual" # If you want to use a specific layer, name it
+layer = None # Just initialising
+
+useRandomStyle = True # Do you want to use all styles in the WMS or not?
+styleName = None # If you want to use a specific style, name it
+
+useRandomTileScale = True # Do you want to use tile size steps below the initialTileSize?
+initialTileSize = 156543.03392804 # must be in CRS units
+
 WMS_ACCESSS_KEY = {}
 keyvalue = os.getenv('WMS_ACCESS_KEY', None)
 if not keyvalue is None:
@@ -28,7 +40,7 @@ if not keyvalue is None:
 
 WEIGHT_GET_CAPABILITIES = int(os.getenv('WEIGHT_GET_CAPABILITIES', "1"))
 WEIGHT_GET_LEGEND_GRAPHIC = int(os.getenv('WEIGHT_GET_LEGEND_GRAPHIC', "2"))
-WEIGHT_GET_MAP = int(os.getenv('WEIGHT_GET_MAP', "10"))
+WEIGHT_GET_MAP = int(os.getenv('WEIGHT_GET_MAP', "100"))
 
 verbose = os.getenv('LOG_VERBOSE', '0')
 VERBOSE = False
@@ -44,7 +56,7 @@ else:
 WMS_VERSION_111 = "1.1.1"
 WMS_VERSION_130 = "1.3.0"
 
-WMS_SUPPORTED_VERSIONS = [WMS_VERSION_130]
+WMS_SUPPORTED_VERSIONS = [WMS_VERSION_130]#,WMS_VERSION_111]
 
 #Allowed MIME TYPEs for WMS Capabilities XML
 MIME_TYPES_GET_CAPABILITIES=[
@@ -65,6 +77,13 @@ PERIODICITY_PATTERN = re.compile(
     +r"((?P<minutes>\d+)M)?"
     +r"((?P<seconds>\d+)S)?"
     +r")?$")
+
+tileDivision = [1,2,4,8] # what to divide the initialTileSize by
+randomIndex = random.randrange(0,len(tileDivision))
+if useRandomTileScale:
+    tileSize = initialTileSize / tileDivision[randomIndex]
+else:
+    tileSize = initialTileSize
 
 def getCommonWMSRequestParams(wmsversion:str):
     commonparams = {
@@ -139,13 +158,11 @@ def getRandomBoundingBox():
 
     # Target bbox rounded from http://bboxfinder.com/#-45.000000,-74.000000,-20.000000,-69.000000:
     # -8300000,-6000000,-7700000,-2200000
-    tileSize = 156543.03392804
-    randomIndex = random.randrange(0,4)
-    tileDivision = [1,2,4,8]
+
     north = random.randrange(-6000000, -2200000)
-    south = north - tileSize / tileDivision[randomIndex]
+    south = north - tileSize
     west = random.randrange(-8300000, -7700000)
-    east = west + tileSize / tileDivision[randomIndex]
+    east = west + tileSize
     return "%s,%s,%s,%s" % (west, south, east, north)
 
 def getStyles (layer: xmltodict.OrderedDict):
@@ -348,8 +365,16 @@ def getRandomGetMapRequest(allLayers:dict, wmsversion:str):
 
     From all available layers randomly picks a layer, style, bounding box and time dimension (if available).
     """
-    randomLayerName = "landsat8_geomedian_annual"#random.choice(list(allLayers.keys()))
-    randomLayer = allLayers[randomLayerName]
+    if useRandomLayer:
+        layerName = random.choice(list(allLayers.keys())) # Set the layerName to a random if needed
+
+    layer = allLayers[layerName]
+
+    if useRandomStyle:
+        styleName = random.choice(list(layer["styles"].keys()))
+    else:
+        styleName = list(layer["styles"].keys())[0]
+
     randomBbox = getRandomBoundingBox()
 
     crsparamname = "crs" # WMS 1.3.0
@@ -360,7 +385,7 @@ def getRandomGetMapRequest(allLayers:dict, wmsversion:str):
     getMapRequestParams = {
         "request": "GetMap",
         crsparamname: "EPSG:3857",
-        "layers": "landsat8_geomedian_annual",#randomLayer["name"],
+        "layers": layerName,
         "width": 256,
         "height": 256,
         "format": "image/png",
@@ -371,11 +396,10 @@ def getRandomGetMapRequest(allLayers:dict, wmsversion:str):
     commonparams = getCommonWMSRequestParams(wmsversion=wmsversion)
     getMapRequestParams.update(commonparams)
 
-    if len(randomLayer["styles"]) > 0:
-        randomStyleName = random.choice(list(randomLayer["styles"].keys()))
-        getMapRequestParams["styles"] = randomStyleName
+    if len(layer["styles"]) > 0:
+        getMapRequestParams["styles"] = styleName
 
-    dimensions = randomLayer["dimensions"]
+    dimensions = layer["dimensions"]
     if "time" in dimensions:
         getMapRequestParams["time"] = random.choice(dimensions["time"]["values"])
 
@@ -385,13 +409,20 @@ def getRandomLegendUrlRequest(allLayers:dict, wmsversion:str):
     """
         Returns request params from the predefined "LegendURL" metadata of a random layer.
     """
-    randomLayerName = "landsat8_geomedian_annual"#random.choice(list(allLayers.keys()))
-    randomLayer = allLayers[randomLayerName]
-    if len(randomLayer["styles"].keys()) < 1:
-        return None
-    randomStyleName = random.choice(list(randomLayer["styles"].keys()))
+    if useRandomLayer:
+        layerName = random.choice(list(allLayers.keys())) # Set the layerName to a random if needed
 
-    url = randomLayer["styles"][randomStyleName]["LegendURL"]
+    layer = allLayers[layerName]
+
+    if len(layer["styles"].keys()) < 1:
+          return None
+
+    if useRandomStyle:
+        styleName = random.choice(list(layer["styles"].keys()))
+    else:
+        styleName = list(layer["styles"].keys())[0]
+    
+    url = layer["styles"][styleName]["LegendURL"]
     if url is None:
         return None
     url = urllib.parse.unquote(url)
@@ -423,14 +454,12 @@ def getRandomGetLegendGraphicRequest(allLayers:dict, wmsversion:str):
 
     From all available layers randomly picks a layer, style, bounding box and time dimension (if available).
     """
-    randomLayerName = "landsat8_geomedian_annual"#random.choice(list(allLayers.keys()))
-    randomLayer = allLayers[randomLayerName]
-
+    layer = allLayers[layerName]
     getLegendGraphicRequestParams = {
         "service": "wms",
         "version": wmsversion,
         "request": "GetLegendGraphic",
-        "layer": randomLayer["name"],
+        "layer": layer["name"],
         "width": 20,
         "height": 20,
         "format": "image/png",
@@ -440,9 +469,8 @@ def getRandomGetLegendGraphicRequest(allLayers:dict, wmsversion:str):
     commonparams = getCommonWMSRequestParams(wmsversion=wmsversion)
     getLegendGraphicRequestParams.update(commonparams)
 
-    if len(randomLayer["styles"].keys()) > 0:
-        randomStyleName = random.choice(list(randomLayer["styles"].keys()))
-        getLegendGraphicRequestParams["style"] = randomStyleName
+    if len(layer["styles"].keys()) > 0:
+        getLegendGraphicRequestParams["style"] = styleName
     else:
         return None
 
@@ -574,7 +602,7 @@ class WebsiteTasks(TaskSet):
         all_layers = sendGetCapabilitiesRequest(client=self.client, wmsversion=wmsversion)
 
         if all_layers is None:
-            return
+            self.interrupt()
 
         if not wmsversion in self.allLayers.keys():
             # parse the capabilities document once
@@ -586,7 +614,7 @@ class WebsiteTasks(TaskSet):
         wmsversion = random.choice(WMS_SUPPORTED_VERSIONS)
         if not wmsversion in self.allLayers:
             # Get Capabilities document not (yet) processed
-            return
+            self.interrupt()
 
         #getLegendGraphicRequest = getRandomGetLegendGraphicRequest(self.allLayers[wmsversion], wmsversion=wmsversion)
         getLegendGraphicRequest = getRandomLegendUrlRequest(self.allLayers[wmsversion], wmsversion=wmsversion)
@@ -599,32 +627,26 @@ class WebsiteTasks(TaskSet):
         wmsversion = random.choice(WMS_SUPPORTED_VERSIONS)
         if not wmsversion in self.allLayers.keys():
             # Get Capabilities document not (yet) processed
-            return
+            self.interrupt()
+
+        layer = self.allLayers[wmsversion][layerName]
+
+        if useRandomStyle:
+            styleName = random.choice(list(layer["styles"].keys()))
+
         getMapRequest = getRandomGetMapRequest(self.allLayers[wmsversion], wmsversion=wmsversion)
         sendGetMapRequest(client=self.client, params=getMapRequest, wmsversion=wmsversion)
 
 
-
 class WebsiteUser(HttpUser):
     tasks = [WebsiteTasks]
-    wait_time = between(5, 15)
+    # wait_time = between(5, 15)
 
+class QuickstartUser(HttpUser):
+    host = "https://ows.earth.dataobservatory.net/wms"
+    tasks = [WebsiteTasks]
+    wait_time = between(1, 2)
 
 if __name__ == "__main__":
-    currentPath = os.path.dirname(os.path.realpath(__file__))
-    for provider in ["dwd", "hh"]:
-        print("Test for Provider: {}".format(provider))
-        for wmsversion in WMS_SUPPORTED_VERSIONS:
-            capabilities = None
-            with open("{}/testdata/getcapabilities_{}_{}.xml".format(currentPath,wmsversion, provider), "r",1024, "utf-8") as stream:
-                capabilities = xmltodict.parse(stream.read())
-
-            allLayers = {
-                wmsversion : getAllLayers(capabilities=capabilities, wmsversion=wmsversion)
-            }
-            getMapRequest = getRandomGetMapRequest(allLayers[wmsversion], wmsversion=wmsversion)
-            print ("{}-WMS-{}-GetMap-Request: \n{}\n".format(provider, wmsversion,getMapRequest))
-            getLegendGraphicRequest = getRandomGetLegendGraphicRequest(allLayers[wmsversion], wmsversion=wmsversion)
-            print ("{}-WMS-{}-GetLegendGraphic-Request: \n{}\n".format(provider, wmsversion,getLegendGraphicRequest))
-            getLegendURLRequest = (getRandomLegendUrlRequest(allLayers[wmsversion], wmsversion=wmsversion))
-            print ("{}-WMS-{}-GetLegendGraphic-Request-From_LegendURL: \n{}\n".format(provider, wmsversion,getLegendURLRequest))
+    # This is only used for local testing    
+    run_single_user(QuickstartUser)

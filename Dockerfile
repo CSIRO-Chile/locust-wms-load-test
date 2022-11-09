@@ -1,4 +1,4 @@
-FROM locustio/locust:2.2.3
+FROM locustio/locust:2.7.0
 
 # Install Python run-time dependencies.
 COPY requirements.txt /
@@ -15,9 +15,9 @@ EXPOSE 8089/tcp
 # application defaults
 #ENV WMS_ACCESS_KEY "myauthkey=mysecretaccesstoken"
 ENV WEIGHT_GET_CAPABILITIES "1"
-ENV WEIGHT_GET_LEGEND_GRAPHIC "2"
-ENV WEIGHT_GET_MAP "10"
-ENV LOG_VERBOSE "0"
+ENV WEIGHT_GET_LEGEND_GRAPHIC "1"
+ENV WEIGHT_GET_MAP "1"
+ENV LOG_VERBOSE "1"
 
 WORKDIR /app/wms-load-test/
 
